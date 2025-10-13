@@ -84,3 +84,4 @@ function ensureSummary2Sheet() {
   moneyRows.forEach(n => sh.getRange(n, 2).setNumberFormat('€ #,##0.00'));
   sh.getRange(startRow, 2, rows.length, 1).setHorizontalAlignment('right');
 }
+
