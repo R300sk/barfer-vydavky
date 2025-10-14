@@ -185,3 +185,11 @@ function menuMatchWithMonthPrompt(){
   var monthName = String(resp.getResponseText()||'').trim();
   matchLastBankImportToMonth(monthName);
 }
+
+/** Menu handler: spáruj s AKTÍVNYM listom (berie názov 2025-01/2025_01). */
+function menuMatchWithActiveMonth(){
+  var sh = SpreadsheetApp.getActiveSheet();
+  var name = sh ? sh.getName() : '';
+  if (!name) throw new Error('Aktívny list nemá názov.');
+  matchLastBankImportToMonth(name);
+}
