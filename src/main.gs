@@ -1,19 +1,3 @@
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('📊 Výdavky')
-    .addItem('Aktualizovať mesačný výkaz', 'buildSummary')
-    .addItem('Aktualizovať Dashboard', 'updateDashboard')
-    .addSeparator()
-    .addItem('💳 Importovať camt.053 z Drive ID', 'menuImportCamt')
-    .addItem('💳 Importovať CSV z Drive ID', 'menuImportCSV')
-    .addItem('📥 Importovať posledný súbor z Inbox priečinka', 'menuImportFromInbox')
-    .addItem('🔗 Spárovať posledný import', 'menuMatchLastImport')
-    .addItem("🧼 Opraviť posledný BankImport", "menuRepairLastBankImport")
-    .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
-    .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
-    .addToUi();
-}
-
 /** Prompt na camt.053 XML import podľa fileId z Drive. */
 function menuImportCamt() {
   const ui = SpreadsheetApp.getUi();
@@ -106,4 +90,19 @@ function menuRepairLastBankImport() {
     SpreadsheetApp.getUi().alert('❌ Chyba pri opravovaní posledného BankImport: ' + e.message);
     throw e;
   }
+}
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("📊 Výdavky")
+    .addItem("Aktualizovať mesačný výkaz", "menuUpdateMonthlyReport")
+    .addItem("Aktualizovať Dashboard", "menuUpdateDashboard")
+    .addSeparator()
+    .addItem("🧾 Importovať camt.053 z Drive ID", "menuImportCamt053ById")
+    .addItem("🧾 Importovať CSV z Drive ID", "menuImportCsvById")
+    .addItem("📥 Importovať posledný súbor z Inbox priečinka", "menuImportFromInbox")
+    .addSeparator()
+    .addItem("🔗 Spárovať posledný import", "menuMatchLastImport")
+    .addItem("🧼 Opraviť posledný BankImport", "menuRepairLastBankImport")
+    .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
+    .addToUi();
 }
