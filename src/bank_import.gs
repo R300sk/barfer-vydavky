@@ -496,3 +496,155 @@ function safeMatchAllBankImportRows(sheetName) {
   // bezpečný zápis do nášho bloku
   sh.getRange(2, outFirstCol, out.length, outColCount).setValues(out);
 }
+
+// ====== CLEANUP & RECOMPUTE FOR BANK IMPORT SHEETS ======
+
+/** Odstráni duplicitné hlavičky s príponou ".1" v prvom riadku. */
+function __dropDuplicateHeaderColumns__(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return;
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  // ideme sprava -> zľava, aby sa indexy nemenili
+  for (var c = lastCol; c >= 1; c--) {
+    var name = header[c - 1];
+    if (name && typeof name === 'string' && /\.1$/.test(name)) {
+      sh.deleteColumn(c);
+    }
+  }
+}
+
+/** Zaistí súvislý blok výstupných hlavičiek na konci listu. */
+function __ensureOutBlockStrict__(sh, headers) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) lastCol = 1;
+  var headerRow = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // pokus nájsť už existujúci súvislý blok
+  outer:
+  for (var c = 1; c <= lastCol - headers.length + 1; c++) {
+    for (var j = 0; j < headers.length; j++) {
+      if (headerRow[c - 1 + j] !== headers[j]) continue outer;
+    }
+    return { col: c, count: headers.length };
+  }
+
+  // inak dopíšeme úplne na koniec v danom poradí
+  var startCol = lastCol + 1;
+  sh.getRange(1, startCol, 1, headers.length).setValues([headers]);
+  return { col: startCol, count: headers.length };
+}
+
+/** Parse peňazí z rôznych text formátov; čísla vracia priamo. */
+function __parseMoney__(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+  var s = String(v).trim().replace(/\u00A0/g, ' ').replace(/ /g, '');
+  if (/\d+\.\d{3},\d{2}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  else if (/\d+,\d{3}\.\d{2}$/.test(s)) s = s.replace(/,/g, '');
+  else s = s.replace(',', '.');
+  var n = Number(s);
+  return isNaN(n) ? null : n;
+}
+
+/** Vyberie sieť sadzieb: najprv z globálu VAT_RATES, inak 23/20/10 %. */
+function __vatRates__() {
+  return (typeof VAT_RATES !== 'undefined' && VAT_RATES && VAT_RATES.length)
+    ? VAT_RATES
+    : [0.23, 0.20, 0.10];
+}
+
+/** Skúsi odvodiť NET z GROSS tak, aby GROSS ≈ NET*(1+r) (tolerancia 0.01). Ak nič, vráti GROSS. */
+function __guessNetFromGross__(gross) {
+  if (gross == null) return '';
+  var rates = __vatRates__();
+  for (var i = 0; i < rates.length; i++) {
+    var r = rates[i];
+    var net = Math.round((gross / (1 + r)) * 100) / 100;
+    var back = Math.round((net * (1 + r)) * 100) / 100;
+    if (Math.abs(back - gross) <= 0.01) return net;
+  }
+  return gross;
+}
+
+/** Nájde index stĺpca so sumou podľa známych názvov; inak -1. */
+function __findAmountIndex__(header) {
+  var candidates = ['Amount', 'Suma', 'AmountWithVat', 'AmountGross', 'Amount EUR', 'Suma EUR'];
+  for (var i = 0; i < candidates.length; i++) {
+    var idx = header.indexOf(candidates[i]);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+/**
+ * Oprav list importu: odstráň duplikátne hlavičky ".1", vytvor súvislý výstupný blok
+ * a dopočítaj NORMALIZED_AMOUNT (odhad netto z GROSS).
+ */
+function repairAndRecomputeBankImport(sheetName) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error("Sheet nie je dostupný: " + sheetName);
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return;
+
+  // 1) odstráň duplicitné .1 stĺpce
+  __dropDuplicateHeaderColumns__(sh);
+
+  // 2) refresh hlavičky po mazaní
+  lastCol = sh.getLastColumn();
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // 3) pevný výstupný blok
+  var OUT_HEADERS = [
+    'MATCH_STATUS','MATCH_RULE','MATCH_SCORE',
+    'NORMALIZED_AMOUNT','EXTRACTED_ICO','EXTRACTED_VAR','EXTRACTED_SPEC','EXTRACTED_KS'
+  ];
+  var outLoc = __ensureOutBlockStrict__(sh, OUT_HEADERS);
+
+  // 4) načítaj dáta a dopočítaj
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+  if (!rows.length) return;
+
+  var amtIdx = __findAmountIndex__(header);
+
+  var out = new Array(rows.length);
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var gross = null;
+
+    if (amtIdx >= 0) gross = __parseMoney__(row[amtIdx]);
+    else {
+      // fallback: prvá číselná hodnota v riadku
+      for (var c = 0; c < row.length; c++) {
+        var tryN = __parseMoney__(row[c]);
+        if (tryN != null) { gross = tryN; break; }
+      }
+    }
+
+    var net = __guessNetFromGross__(gross);
+
+    out[i] = ['UNMATCHED', '', 0, (net !== '' ? net : ''), '', '', '', ''];
+  }
+
+  // 5) bezpečný zápis do výstupného bloku (súvislý rozsah)
+  sh.getRange(2, outLoc.col, out.length, outLoc.count).setValues(out);
+}
+
+// shortcut: spusti na aktívnom importe (poslednom vytvorenom liste BankImport_*)
+function repairLastBankImport() {
+  var ss = SpreadsheetApp.getActive();
+  var sheets = ss.getSheets();
+  var latest = null, latestTime = 0;
+  for (var i = 0; i < sheets.length; i++) {
+    var sh = sheets[i];
+    var n = sh.getName();
+    if (n.indexOf('BankImport_') === 0) {
+      var t = sh.getLastUpdated ? sh.getLastUpdated().getTime() : 0;
+      if (t >= latestTime) { latestTime = t; latest = sh; }
+    }
+  }
+  if (!latest) throw new Error('Nenašiel som žiadny list začínajúci "BankImport_".');
+  repairAndRecomputeBankImport(latest.getName());
+}
