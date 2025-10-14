@@ -21,7 +21,7 @@ function menuImportCamt() {
 
   const sheetName = importBankCamtFromDrive(fileId);
   try {
-    matchAllBankImportRows(sheetName);
+    safeMatchAllBankImportRows(sheetName);
     ui.alert("Hotovo", "Naimportované a spárované do listu:\n" + sheetName, ui.ButtonSet.OK);
   } catch (e) {
     ui.alert("Import prebehol, párovanie zlyhalo:\n" + e, ui.ButtonSet.OK);
@@ -38,7 +38,7 @@ function menuImportCSV() {
 
   const sheetName = importBankCSVFromDrive(fileId);
   try {
-    matchAllBankImportRows(sheetName);
+    safeMatchAllBankImportRows(sheetName);
     ui.alert("Hotovo", "Naimportované a spárované do listu:\n" + sheetName, ui.ButtonSet.OK);
   } catch (e) {
     ui.alert("Import prebehol, párovanie zlyhalo:\n" + e, ui.ButtonSet.OK);
@@ -70,7 +70,7 @@ function menuImportFromInbox() {
   else sheetName = importBankCSVFromDrive(fileId);
 
   try {
-    matchAllBankImportRows(sheetName);
+    safeMatchAllBankImportRows(sheetName);
     ui.alert("Hotovo", "Naimportované a spárované:\n" + chosen.n + "\n→ " + sheetName, ui.ButtonSet.OK);
   } catch (e) {
     ui.alert("Import prebehol, párovanie zlyhalo:\n" + e, ui.ButtonSet.OK);
@@ -87,7 +87,7 @@ function menuMatchLastImport() {
 
   const last = importSheets.sort((a,b) => b.getIndex() - a.getIndex())[0];
   try {
-    matchAllBankImportRows(last.getName());
+    safeMatchAllBankImportRows(last.getName());
     ui.alert("Hotovo", "Spárované znova: " + last.getName(), ui.ButtonSet.OK);
   } catch (e) {
     ui.alert("Párovanie zlyhalo:\n" + e, ui.ButtonSet.OK);

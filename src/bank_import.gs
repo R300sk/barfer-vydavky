@@ -281,3 +281,86 @@ function levenshtein_(a, b) {
   }
   return dp[al][bl];
 }
+
+// ====== SAFE MATCH WRAPPER (vyhne sa 0-stĺpcovým range) ======
+/**
+ * Bezpečné párovanie – vytvorí MATCH_* stĺpce ak chýbajú,
+ * a zapisuje len keď je čo zapisovať (žiadne 0-column range).
+ * Ak zatiaľ nemáme implementované reálne heuristiky, zapíše základné placeholdery,
+ * takže nikdy nepadne na setValues().
+ */
+function safeMatchAllBankImportRows(sheetName) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error("Sheet nie je dostupný: " + sheetName);
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) {
+    // nič na párovanie – končíme potichu
+    return;
+  }
+
+  // prečítaj hlavičky
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // požadované výstupné hlavičky
+  var OUT_HEADERS = [
+    'MATCH_STATUS','MATCH_RULE','MATCH_SCORE',
+    'NORMALIZED_AMOUNT','EXTRACTED_ICO','EXTRACTED_VAR','EXTRACTED_SPEC','EXTRACTED_KS'
+  ];
+
+  // nájdi prvý voľný stĺpec na konci (alebo ak už hlavičky existujú, použi ich pozície)
+  var startCol = header.length + 1;
+
+  // Ak už niektoré z OUT_HEADERS existujú, presunieme startCol na najmenší existujúci index
+  for (var h = 0; h < OUT_HEADERS.length; h++) {
+    var idx = header.indexOf(OUT_HEADERS[h]);
+    if (idx >= 0) startCol = Math.min(startCol, idx + 1);
+  }
+
+  // Ak hlavičky chýbajú, dopíšeme ich na koniec
+  if (startCol === header.length + 1) {
+    sh.getRange(1, startCol, 1, OUT_HEADERS.length).setValues([OUT_HEADERS]);
+  } else {
+    // Uisti sa, že všetky OUT_HEADERS sú na miestach – ak niektoré chýbajú medzi,
+    // dopíšeme ich postupne (jednoduché, ale robustné).
+    var existing = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    for (var oh = 0; oh < OUT_HEADERS.length; oh++) {
+      if (existing.indexOf(OUT_HEADERS[oh]) === -1) {
+        sh.insertColumnAfter(sh.getLastColumn());
+        var newCol = sh.getLastColumn();
+        sh.getRange(1, newCol).setValue(OUT_HEADERS[oh]);
+      }
+    }
+  }
+
+  // znovu načítaj posledný stĺpec po prípadnom vkladaní
+  var outFirstCol = startCol;
+  var outColCount = OUT_HEADERS.length;
+
+  // načítaj dáta (bez hlavičky)
+  var data = sh.getRange(2, 1, lastRow - 1, header.length).getValues();
+  if (!data.length) return; // žiadne riadky
+
+  // heuristiky – ak zatiaľ nevieme, dáme defaulty, aby nenastala 0-column situácia
+  // (prípadné skutočné matchovanie máte v bank_import*.gs; toto je "safety net")
+  var out = [];
+  // pokus o detekciu stĺpca so sumou
+  var amtIdx = Math.max(header.indexOf('Amount'), header.indexOf('Suma'));
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var amountRaw = (amtIdx >= 0) ? row[amtIdx] : '';
+    var amountNum = (typeof amountRaw === 'number') ? amountRaw
+                   : (amountRaw ? Number(String(amountRaw).replace(',', '.')) : '');
+    var norm = (typeof amountNum === 'number' && !isNaN(amountNum)) ? amountNum : '';
+
+    // default – unmatched; MATCH_RULE a SCORE necháme prázdne/0
+    out.push(['UNMATCHED','',0, norm,'','','','']);
+  }
+
+  // bezpečný zápis – len ak máme aspoň 1 stĺpec
+  if (out.length && out[0].length >= 1) {
+    sh.getRange(2, outFirstCol, out.length, out[0].length).setValues(out);
+  }
+}
