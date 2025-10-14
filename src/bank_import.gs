@@ -9,7 +9,7 @@
 const BANK_IMPORT_CONFIG = {
   BANK_SHEET_PREFIX: "BankImport_",
   TARGET_SHEET: (typeof CONFIG !== 'undefined' && CONFIG.SHEETS) ? CONFIG.SHEETS.VYDAVKY : "Výdavky",
-  VAT_RATES: [0.20, 0.10],
+  VAT_RATES: [0.23, 0.20, 0.10],
   DATE_WINDOW_DAYS: 3,
   AMOUNT_TOLERANCE: 0.5
 };
