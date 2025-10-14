@@ -364,3 +364,135 @@ function safeMatchAllBankImportRows(sheetName) {
     sh.getRange(2, outFirstCol, out.length, out[0].length).setValues(out);
   }
 }
+
+// ========= ROBUSTNÁ VERZIA SAFE MATCH (pevný blok stĺpcov) =========
+
+/** Nájde/ vytvorí súvislý blok výstupných hlavičiek na konci a vráti {col, count}. */
+function __ensureOutBlock__(sh, headers) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) lastCol = 1;
+
+  // Skús nájsť existujúci súvislý blok headers v akomkoľvek mieste
+  var headerRow = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  outer:
+  for (var c = 1; c <= lastCol - headers.length + 1; c++) {
+    for (var j = 0; j < headers.length; j++) {
+      if (headerRow[c - 1 + j] !== headers[j]) continue outer;
+    }
+    return { col: c, count: headers.length }; // našli sme
+  }
+
+  // Inak ich pridáme na úplný koniec v správnom poradí
+  var startCol = lastCol + 1;
+  sh.getRange(1, startCol, 1, headers.length).setValues([headers]);
+  return { col: startCol, count: headers.length };
+}
+
+/** Parsuje peniaze z rôznych formátov (1 234,56 | 1 234,56 | 1,234.56 | -1234,56). */
+function __parseMoney__(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+
+  var s = String(v).trim();
+  // odstraň NBSP aj bežné medzery
+  s = s.replace(/\u00A0/g, ' ').replace(/ /g, '');
+  // ak je vo formáte 1.234,56 => odstráň bodky (tisíce) a zmeň čiarku na bodku
+  if (/\d+\.\d{3},\d{2}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  // ak je vo formáte 1,234.56 => odstráň čiarky (tisíce)
+  else if (/\d+,\d{3}\.\d{2}$/.test(s)) s = s.replace(/,/g, '');
+  // bežný SK: 1234,56
+  else s = s.replace(',', '.');
+
+  var n = Number(s);
+  return isNaN(n) ? null : n;
+}
+
+/** Vracia sumu bez DPH – skúsi viac sadzieb, vráti najbližšie 2 des. */
+function __netOfVat__(gross, rates) {
+  if (gross == null) return null;
+  for (var i = 0; i < rates.length; i++) {
+    var r = rates[i];
+    var net = gross / (1 + r);
+    // zaokrúhlenie na 2 des.
+    net = Math.round(net * 100) / 100;
+    if (isFinite(net)) return net; // prvý platný stačí (chová sa deterministicky)
+  }
+  return gross;
+}
+
+/** Nájdi index stĺpca so sumou podľa známych názvov; fallback: prvý číselný */
+function __findAmountIndex__(header) {
+  var candidates = ['Amount', 'Suma', 'AmountWithVat', 'AmountGross', 'Amount EUR', 'Suma EUR'];
+  for (var i = 0; i < candidates.length; i++) {
+    var idx = header.indexOf(candidates[i]);
+    if (idx >= 0) return idx;
+  }
+  // fallback: prvý stĺpec, kde vo 2. riadku vyzerá hodnota ako číslo
+  return -1;
+}
+
+/** Hlavný bezpečný matcher – zapisuje len do vlastného bloku na konci listu. */
+function safeMatchAllBankImportRows(sheetName) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error("Sheet nie je dostupný: " + sheetName);
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return; // nič na párovanie
+
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // Náš presný blok výstupu (nepliesť so starými NORMALIZED_DATE a pod.)
+  var OUT_HEADERS = [
+    'MATCH_STATUS','MATCH_RULE','MATCH_SCORE',
+    'NORMALIZED_AMOUNT','EXTRACTED_ICO','EXTRACTED_VAR','EXTRACTED_SPEC','EXTRACTED_KS'
+  ];
+
+  var outLoc = __ensureOutBlock__(sh, OUT_HEADERS);
+  var outFirstCol = outLoc.col;
+  var outColCount = outLoc.count;
+
+  // Načítaj dáta (bez hlavičky) v rozsahu vstupných stĺpcov (1..lastCol)
+  var rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  if (!rows.length) return;
+
+  // Nájdeme index sumy
+  var amtIdx = __findAmountIndex__(header);
+
+  // VAT sadzby – ak sú v projekte definované, použi tie; inak default
+  var rates = (typeof VAT_RATES !== 'undefined' && VAT_RATES && VAT_RATES.length)
+    ? VAT_RATES
+    : [0.23, 0.20, 0.10];
+
+  var out = new Array(rows.length);
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+
+    // zober kandidáta na sumu
+    var gross = null;
+    if (amtIdx >= 0) {
+      gross = __parseMoney__(row[amtIdx]);
+    } else {
+      // fallback: prvá hodnota v riadku, ktorá vyzerá číselne
+      for (var c = 0; c < row.length; c++) {
+        var tryN = __parseMoney__(row[c]);
+        if (tryN != null) { gross = tryN; break; }
+      }
+    }
+
+    var net = __netOfVat__(gross, rates);
+
+    // (aktuálne placeholder – ďalšie polia doplníme pravidlami neskôr)
+    out[i] = [
+      'UNMATCHED', // MATCH_STATUS
+      '',          // MATCH_RULE
+      0,           // MATCH_SCORE
+      (net != null ? net : ''), // NORMALIZED_AMOUNT
+      '', '', '', '' // EXTRACTED_*
+    ];
+  }
+
+  // bezpečný zápis do nášho bloku
+  sh.getRange(2, outFirstCol, out.length, outColCount).setValues(out);
+}
