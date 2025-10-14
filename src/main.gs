@@ -9,6 +9,7 @@ function onOpen() {
     .addItem('📥 Importovať posledný súbor z Inbox priečinka', 'menuImportFromInbox')
     .addItem('🔗 Spárovať posledný import', 'menuMatchLastImport')
     .addItem("🧼 Opraviť posledný BankImport", "menuRepairLastBankImport")
+    .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
     .addToUi();
 }
 
