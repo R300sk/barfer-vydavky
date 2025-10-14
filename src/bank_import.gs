@@ -648,3 +648,63 @@ function repairLastBankImport() {
   if (!latest) throw new Error('Nenašiel som žiadny list začínajúci "BankImport_".');
   repairAndRecomputeBankImport(latest.getName());
 }
+
+// ====== PATCH: robustné rozpoznanie Amount a znamienko podľa CreditDebit ======
+
+function __findAndComputeAmount__(header, row) {
+  const hLower = header.map(h => String(h || '').toLowerCase());
+  const amountIdx = hLower.indexOf('amount');
+  const creditIdx = hLower.indexOf('credit');
+  const debitIdx = hLower.indexOf('debit');
+  const cdIdx = hLower.indexOf('creditdebit');
+
+  // 1️⃣ urči hodnotu
+  let raw = null;
+  if (amountIdx >= 0) raw = __parseMoney__(row[amountIdx]);
+  else if (creditIdx >= 0 && debitIdx >= 0) {
+    const credit = __parseMoney__(row[creditIdx]) || 0;
+    const debit = __parseMoney__(row[debitIdx]) || 0;
+    raw = credit - debit;
+  }
+
+  // 2️⃣ aplikuj znamienko podľa CreditDebit
+  if (cdIdx >= 0) {
+    const cdVal = String(row[cdIdx]).trim().toUpperCase();
+    if (cdVal === 'DBIT' && raw > 0) raw = -raw;
+  }
+
+  return raw;
+}
+
+// prepíš časť repairAndRecomputeBankImport() (override)
+const __oldRepair__ = repairAndRecomputeBankImport;
+repairAndRecomputeBankImport = function(sheetName) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error("Sheet nie je dostupný: " + sheetName);
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return;
+
+  __dropDuplicateHeaderColumns__(sh);
+
+  const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const OUT_HEADERS = [
+    'MATCH_STATUS','MATCH_RULE','MATCH_SCORE',
+    'NORMALIZED_AMOUNT','EXTRACTED_ICO','EXTRACTED_VAR','EXTRACTED_SPEC','EXTRACTED_KS'
+  ];
+  const outLoc = __ensureOutBlockStrict__(sh, OUT_HEADERS);
+
+  const rows = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  const out = new Array(rows.length);
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const gross = __findAndComputeAmount__(header, row);
+    const net = __guessNetFromGross__(gross);
+    out[i] = ['UNMATCHED', '', 0, net, '', '', '', ''];
+  }
+
+  sh.getRange(2, outLoc.col, out.length, outLoc.count).setValues(out);
+};
