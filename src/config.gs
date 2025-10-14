@@ -11,5 +11,5 @@
   // Teraz je CONFIG určite dostupný ako globálna referencia
   CONFIG.BANK = CONFIG.BANK || {};
   // ponecháme existujúcu hodnotu, alebo dáme prázdny string
-  CONFIG.BANK.INBOX_FOLDER_ID = CONFIG.BANK.INBOX_FOLDER_ID || "";
+  CONFIG.BANK.INBOX_FOLDER_ID = CONFIG.BANK.INBOX_FOLDER_ID || "197m6hr3iF39HjDBdNJdJ8HFtfFumTD5B";
 })();
