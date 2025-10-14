@@ -10,6 +10,7 @@ function onOpen() {
     .addItem('🔗 Spárovať posledný import', 'menuMatchLastImport')
     .addItem("🧼 Opraviť posledný BankImport", "menuRepairLastBankImport")
     .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
+    .addItem("🔗 Spárovať s mesiacom…", "menuMatchWithMonthPrompt")
     .addToUi();
 }
 
