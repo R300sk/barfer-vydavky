@@ -1,7 +1,7 @@
 /**
  * Bank matcher – spáruje posledný BankImport_* s mesačným listom.
  * Akceptuje mesiac vo formáte YYYY-MM aj YYYY_MM.
- * UNMATCHED riadky exportuje do Unmatched_<mesiac>.
+ * UNMATCHED riadky exportuje do Unmatched_<mesiac>, + diagnostiku do Match_Diagnostics_<mesiac>.
  */
 
 /*** ───────────── Helpers ───────────── ***/
@@ -113,18 +113,39 @@ function _idxByHeuristic_(sh){
 }
 
 /*** ───────────── Scoring ───────────── ***/
-function _score_(imp, m){
-  var s=0, rs=[];
-  var net=(typeof imp.net==='number')?imp.net:_guessNetFromGross_(imp.gross);
-  if(typeof net==='number'&&typeof m.amountNet==='number'&&Math.abs(net-m.amountNet)<=0.05){ s+=60; rs.push('amount±0.05'); }
-  if(imp.date&&m.date&&Math.abs(_days_(imp.date,m.date))<=3){ s+=25; rs.push('date±3'); }
-  if(imp.ids.vs&&m.vs&&String(imp.ids.vs)===String(m.vs)){ s+=15; rs.push('VS'); }
-  if(imp.ids.ks&&m.ks&&String(imp.ids.ks)===String(m.ks)){ s+=8; rs.push('KS'); }
-  if(imp.ids.ss&&m.ss&&String(imp.ids.ss)===String(m.ss)){ s+=8; rs.push('SS'); }
-  if(imp.ids.freeText&&m.vendor){
-    var ft=String(imp.ids.freeText).toLowerCase(), vn=String(m.vendor).toLowerCase();
-    if(ft&&vn&&(ft.indexOf(vn)>=0||vn.indexOf(ft)>=0)){ s+=10; rs.push('vendor~'); }
+var AMT_EPS = 0.10;       // ±0.10 €
+var DATE_EPS_DAYS = 7;    // ±7 dní
+
+function _amountMatch_(impGross, impNet, monthAmt){
+  // skúsiť 6 variant: net, gross, abs(net), abs(gross), -net, -gross
+  var candidates = [
+    {val: impNet,   tag: 'amount(net)'},
+    {val: impGross, tag: 'amount(gross)'},
+    {val: (typeof impNet==='number')? Math.abs(impNet):null,   tag: 'amount(abs net)'},
+    {val: (typeof impGross==='number')? Math.abs(impGross):null, tag: 'amount(abs gross)'},
+    {val: (typeof impNet==='number')? -impNet:null,   tag: 'amount(-net)'},
+    {val: (typeof impGross==='number')? -impGross:null, tag: 'amount(-gross)'}
+  ];
+  var best = {ok:false, score:0, mode:'', delta:1e9};
+  for (var i=0;i<candidates.length;i++){
+    var v=candidates[i].val; if(typeof v!=='number') continue;
+    var delta = Math.abs(v - monthAmt);
+    if (isNaN(delta)) continue;
+    var ok = delta <= AMT_EPS;
+    var sc = ok ? 60 : Math.max(0, 60 - (delta*200)); // lineárny pokles, 0.10 -> 40, 0.25 -> 10, atď.
+    if (sc>best.score){ best={ok:ok, score:sc, mode:candidates[i].tag, delta:delta}; }
   }
+  return best;
+}
+
+function _score_(imp, m){
+  var rs=[];
+  var amt=_amountMatch_(imp.gross, imp.net, m.amountNet);
+  var s = amt.score; if(amt.mode) rs.push(amt.mode);
+  if(imp.date&&m.date&&Math.abs(_days_(imp.date,m.date))<=DATE_EPS_DAYS){ s+=25; rs.push('date±'+DATE_EPS_DAYS); }
+  if(imp.ids.vs&&m.vs&&String(imp.ids.vs)===String(m.vs)){ s+=15; rs.push('VS'); }
+  if(imp.ids.ks&&m.ks&&String(imp.ids.ks)===String(m.ks)){ s+=8;  rs.push('KS'); }
+  if(imp.ids.ss&&m.ss&&String(imp.ids.ss)===String(m.ss)){ s+=8;  rs.push('SS'); }
   return {score:s, reason:rs.join(', ')};
 }
 
@@ -167,8 +188,8 @@ function matchLastBankImportToMonth(monthName){
     return {rowIndex:i+2, date:_parseDate_(r[idDate]), amountNet:_parseMoney_(r[idAmt]), vendor:idVend>=0?r[idVend]:'', vs:idVS>=0?r[idVS]:'', ks:idKS>=0?r[idKS]:'', ss:idSS>=0?r[idSS]:''};
   });
 
-  // 4) skórovanie
-  var unmatched=[];
+  // 4) skórovanie + diagnostika
+  var unmatched=[], diag=[['ImpRow','ImpDate','ImpGross','ImpNet','BestScore','BestReason','MonthRow','MonthDate','MonthAmount','MonthVS','MonthVendor']];
   for (var i=0;i<iRows.length;i++){
     var r=iRows[i];
     var vIdx = Math.max(iHdr.indexOf('ValueDate'), iHdr.indexOf('BookDate'));
@@ -182,8 +203,9 @@ function matchLastBankImportToMonth(monthName){
       var sc=_score_({gross:g,net:n,date:d,ids:ids}, mRows[j]);
       if(sc.score>best.score){ best={score:sc.score, reason:sc.reason, match:mRows[j]}; }
     }
+
     if(best.score>=70){
-      out[i]=['MATCHED','amount+date'+(ids.vs?' +VS':''),best.score,n,'',ids.vs||'',ids.ss||'',ids.ks||''];
+      out[i]=['MATCHED',best.reason,best.score,n,'',ids.vs||'',ids.ss||'',ids.ks||''];
     }else{
       out[i]=['UNMATCHED',best.reason,best.score,n,'',ids.vs||'',ids.ss||'',ids.ks||''];
       unmatched.push([
@@ -192,11 +214,27 @@ function matchLastBankImportToMonth(monthName){
         r.join(' | ')
       ]);
     }
+
+    // diagnostika
+    var md = best.match || {};
+    diag.push([
+      i+2,
+      d?Utilities.formatDate(d,_tz_(),'yyyy-MM-dd'):'',
+      (typeof g==='number')?g:'',
+      (typeof n==='number')?n:'',
+      best.score,
+      best.reason,
+      md.rowIndex||'',
+      md.date?Utilities.formatDate(md.date,_tz_(),'yyyy-MM-dd'):'',
+      (typeof md.amountNet==='number')?md.amountNet:'',
+      md.vs||'',
+      md.vendor||''
+    ]);
   }
 
   if(out.length) imp.getRange(2,oLoc.col,out.length,oLoc.count).setValues(out);
 
-  // 5) výstupný list unmatched
+  // 5) výstup: unmatched
   var nameVar=_monthVariants_(month.getName())[0]; // štandard s pomlčkou
   var unName='Unmatched_'+nameVar;
   var un=ss.getSheetByName(unName); if(!un) un=ss.insertSheet(unName); else un.clear();
@@ -204,7 +242,13 @@ function matchLastBankImportToMonth(monthName){
   if(unmatched.length) un.getRange(2,1,unmatched.length,unmatched[0].length).setValues(unmatched);
   un.setFrozenRows(1);
 
-  SpreadsheetApp.getUi().alert('✅ Párovanie dokončené.\nMatched: '+(iRows.length-unmatched.length)+'\nUnmatched: '+unmatched.length+'\nVýstup: Import list + '+unName);
+  // 6) diagnostika
+  var dgName='Match_Diagnostics_'+nameVar;
+  var dg=ss.getSheetByName(dgName); if(!dg) dg=ss.insertSheet(dgName); else dg.clear();
+  dg.getRange(1,1,diag.length,diag[0].length).setValues(diag);
+  dg.setFrozenRows(1);
+
+  SpreadsheetApp.getUi().alert('✅ Párovanie dokončené.\nMatched: '+(iRows.length-unmatched.length)+'\nUnmatched: '+unmatched.length+'\nVýstup: Import list + '+unName+'\nDiagnostika: '+dgName);
 }
 
 /** Prompt (YYYY-MM alebo YYYY_MM). */
