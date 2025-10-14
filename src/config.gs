@@ -13,3 +13,10 @@
   // ponecháme existujúcu hodnotu, alebo dáme prázdny string
   CONFIG.BANK.INBOX_FOLDER_ID = CONFIG.BANK.INBOX_FOLDER_ID || "197m6hr3iF39HjDBdNJdJ8HFtfFumTD5B";
 })();
+
+// ---- defaults for date/time ----
+(function () {
+  if (typeof CONFIG === 'undefined') this.CONFIG = {};
+  CONFIG.TIMEZONE    = (typeof CONFIG.TIMEZONE    === 'string' && CONFIG.TIMEZONE)    ? CONFIG.TIMEZONE    : 'Europe/Bratislava';
+  CONFIG.DATE_FORMAT = (typeof CONFIG.DATE_FORMAT === 'string' && CONFIG.DATE_FORMAT) ? CONFIG.DATE_FORMAT : 'yyyy-MM-dd';
+})();
