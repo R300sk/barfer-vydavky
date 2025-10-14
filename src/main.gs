@@ -8,6 +8,7 @@ function onOpen() {
     .addItem('💳 Importovať CSV z Drive ID', 'menuImportCSV')
     .addItem('📥 Importovať posledný súbor z Inbox priečinka', 'menuImportFromInbox')
     .addItem('🔗 Spárovať posledný import', 'menuMatchLastImport')
+    .addItem("🧼 Opraviť posledný BankImport", "menuRepairLastBankImport")
     .addToUi();
 }
 
@@ -91,5 +92,16 @@ function menuMatchLastImport() {
     ui.alert("Hotovo", "Spárované znova: " + last.getName(), ui.ButtonSet.OK);
   } catch (e) {
     ui.alert("Párovanie zlyhalo:\n" + e, ui.ButtonSet.OK);
+  }
+}
+
+/** Menu handler: Opraviť posledný BankImport (drop dup .1 stĺpce, prepočítať NORMALIZED_AMOUNT) */
+function menuRepairLastBankImport() {
+  try {
+    repairLastBankImport();
+    SpreadsheetApp.getUi().alert('✅ Hotovo: posledný BankImport bol opravený a prepočítaný.');
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('❌ Chyba pri opravovaní posledného BankImport: ' + e.message);
+    throw e;
   }
 }
